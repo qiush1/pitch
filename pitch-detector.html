@@ -1,0 +1,1031 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>音高检测器 · Pitch Detector</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;600;700&family=Noto+Sans+SC:wght@300;400;500;700&display=swap');
+
+:root {
+  --bg-deep: #0a0e1a;
+  --bg-card: #111827;
+  --bg-surface: #1a2236;
+  --accent: #22d3ee;
+  --accent-dim: rgba(34,211,238,0.15);
+  --accent-glow: rgba(34,211,238,0.4);
+  --warm: #f59e0b;
+  --warm-dim: rgba(245,158,11,0.15);
+  --green: #10b981;
+  --green-dim: rgba(16,185,129,0.15);
+  --red: #ef4444;
+  --red-dim: rgba(239,68,68,0.15);
+  --text: #e2e8f0;
+  --text-dim: #64748b;
+  --text-muted: #475569;
+  --radius: 16px;
+}
+
+* { margin:0; padding:0; box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+
+html, body {
+  height: 100%;
+  font-family: 'Noto Sans SC', sans-serif;
+  background: var(--bg-deep);
+  color: var(--text);
+  overflow-x: hidden;
+  overscroll-behavior: none;
+}
+
+body {
+  display: flex;
+  flex-direction: column;
+  min-height: 100dvh;
+}
+
+/* Background atmosphere */
+body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  background:
+    radial-gradient(ellipse 60% 50% at 20% 10%, rgba(34,211,238,0.06) 0%, transparent 70%),
+    radial-gradient(ellipse 50% 40% at 80% 90%, rgba(245,158,11,0.04) 0%, transparent 70%);
+  pointer-events: none;
+  z-index: 0;
+}
+
+.container {
+  position: relative;
+  z-index: 1;
+  width: 100%;
+  max-width: 480px;
+  margin: 0 auto;
+  padding: 16px;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+/* Header */
+.header {
+  text-align: center;
+  padding: 8px 0 4px;
+}
+.header h1 {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 1.3rem;
+  font-weight: 600;
+  letter-spacing: 2px;
+  background: linear-gradient(135deg, var(--accent), #a78bfa);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+.header p {
+  font-size: 0.75rem;
+  color: var(--text-dim);
+  margin-top: 2px;
+}
+
+/* Mode Tabs */
+.mode-tabs {
+  display: flex;
+  background: var(--bg-card);
+  border-radius: 12px;
+  padding: 4px;
+  gap: 4px;
+  border: 1px solid rgba(255,255,255,0.04);
+}
+.mode-tab {
+  flex: 1;
+  padding: 10px 0;
+  text-align: center;
+  border: none;
+  background: transparent;
+  color: var(--text-dim);
+  font-family: 'Noto Sans SC', sans-serif;
+  font-size: 0.85rem;
+  font-weight: 500;
+  border-radius: 9px;
+  cursor: pointer;
+  transition: all 0.25s;
+}
+.mode-tab.active {
+  background: var(--accent-dim);
+  color: var(--accent);
+  box-shadow: 0 0 20px rgba(34,211,238,0.08);
+}
+
+/* Main Display Card */
+.pitch-display {
+  background: var(--bg-card);
+  border-radius: var(--radius);
+  padding: 24px 20px;
+  text-align: center;
+  border: 1px solid rgba(255,255,255,0.04);
+  position: relative;
+  overflow: hidden;
+}
+.pitch-display::after {
+  content: '';
+  position: absolute;
+  top: -1px;
+  left: 20%;
+  right: 20%;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, var(--accent-glow), transparent);
+}
+
+.note-name {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 4.5rem;
+  font-weight: 700;
+  line-height: 1;
+  color: var(--accent);
+  text-shadow: 0 0 40px var(--accent-glow);
+  transition: color 0.15s;
+  min-height: 72px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.note-name .octave {
+  font-size: 2rem;
+  opacity: 0.6;
+  vertical-align: super;
+  margin-left: 2px;
+}
+.note-name.sharp { color: var(--warm); text-shadow: 0 0 40px rgba(245,158,11,0.4); }
+.note-name.flat { color: var(--red); text-shadow: 0 0 40px rgba(239,68,68,0.4); }
+.note-name.perfect { color: var(--green); text-shadow: 0 0 40px rgba(16,185,129,0.5); }
+
+.freq-display {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 1.4rem;
+  font-weight: 300;
+  color: var(--text-dim);
+  margin-top: 6px;
+}
+.freq-display span { font-size: 0.8rem; opacity: 0.5; }
+
+/* Cents indicator */
+.cents-bar-wrapper {
+  margin-top: 18px;
+  position: relative;
+}
+.cents-labels {
+  display: flex;
+  justify-content: space-between;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.65rem;
+  color: var(--text-muted);
+  margin-bottom: 6px;
+  padding: 0 2px;
+}
+.cents-bar {
+  height: 8px;
+  background: var(--bg-surface);
+  border-radius: 4px;
+  position: relative;
+  overflow: visible;
+}
+.cents-bar .center-mark {
+  position: absolute;
+  left: 50%;
+  top: -3px;
+  bottom: -3px;
+  width: 2px;
+  background: var(--text-dim);
+  border-radius: 1px;
+  transform: translateX(-50%);
+}
+.cents-needle {
+  position: absolute;
+  top: -4px;
+  width: 16px;
+  height: 16px;
+  background: var(--accent);
+  border-radius: 50%;
+  transform: translateX(-50%);
+  left: 50%;
+  transition: left 0.08s ease-out, background 0.15s;
+  box-shadow: 0 0 12px var(--accent-glow);
+}
+.cents-needle.sharp { background: var(--warm); box-shadow: 0 0 12px rgba(245,158,11,0.5); }
+.cents-needle.flat { background: var(--red); box-shadow: 0 0 12px rgba(239,68,68,0.5); }
+.cents-needle.perfect { background: var(--green); box-shadow: 0 0 12px rgba(16,185,129,0.5); }
+
+.cents-value {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.85rem;
+  color: var(--text-dim);
+  margin-top: 10px;
+}
+
+/* Waveform / Spectrogram Canvas */
+.visual-card {
+  background: var(--bg-card);
+  border-radius: var(--radius);
+  padding: 12px;
+  border: 1px solid rgba(255,255,255,0.04);
+}
+.visual-card canvas {
+  width: 100%;
+  height: 100px;
+  border-radius: 8px;
+  display: block;
+}
+
+/* Pitch History (timeline) */
+.history-card {
+  background: var(--bg-card);
+  border-radius: var(--radius);
+  padding: 12px;
+  border: 1px solid rgba(255,255,255,0.04);
+}
+.history-card .card-label {
+  font-size: 0.7rem;
+  color: var(--text-muted);
+  margin-bottom: 8px;
+  font-weight: 500;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+}
+.history-card canvas {
+  width: 100%;
+  height: 120px;
+  border-radius: 8px;
+  display: block;
+}
+
+/* Control Button */
+.controls {
+  display: flex;
+  gap: 10px;
+  padding-bottom: 12px;
+}
+.btn {
+  flex: 1;
+  padding: 14px 0;
+  border: none;
+  border-radius: 12px;
+  font-family: 'Noto Sans SC', sans-serif;
+  font-size: 0.95rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
+.btn-primary {
+  background: linear-gradient(135deg, var(--accent), #06b6d4);
+  color: #0a0e1a;
+  box-shadow: 0 4px 24px rgba(34,211,238,0.25);
+}
+.btn-primary:active { transform: scale(0.97); }
+.btn-primary.recording {
+  background: linear-gradient(135deg, var(--red), #dc2626);
+  box-shadow: 0 4px 24px rgba(239,68,68,0.3);
+  animation: pulse-rec 1.5s infinite;
+}
+@keyframes pulse-rec {
+  0%,100% { box-shadow: 0 4px 24px rgba(239,68,68,0.3); }
+  50% { box-shadow: 0 4px 32px rgba(239,68,68,0.5); }
+}
+.btn-secondary {
+  background: var(--bg-surface);
+  color: var(--text-dim);
+  border: 1px solid rgba(255,255,255,0.06);
+}
+.btn-secondary:active { transform: scale(0.97); }
+
+/* Recording mode result panel */
+.record-result {
+  background: var(--bg-card);
+  border-radius: var(--radius);
+  padding: 16px;
+  border: 1px solid rgba(255,255,255,0.04);
+  display: none;
+}
+.record-result.visible { display: block; }
+.record-result h3 {
+  font-size: 0.85rem;
+  color: var(--accent);
+  margin-bottom: 12px;
+  font-weight: 500;
+}
+.stat-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+.stat-item {
+  background: var(--bg-surface);
+  border-radius: 10px;
+  padding: 12px;
+}
+.stat-item .label {
+  font-size: 0.68rem;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+.stat-item .value {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 1.1rem;
+  font-weight: 600;
+  color: var(--text);
+  margin-top: 4px;
+}
+.note-list {
+  margin-top: 12px;
+  background: var(--bg-surface);
+  border-radius: 10px;
+  padding: 12px;
+}
+.note-list .label {
+  font-size: 0.68rem;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-bottom: 8px;
+}
+.note-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.note-tag {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.78rem;
+  padding: 4px 10px;
+  background: var(--accent-dim);
+  color: var(--accent);
+  border-radius: 6px;
+  font-weight: 500;
+}
+
+/* Status bar */
+.status {
+  text-align: center;
+  font-size: 0.72rem;
+  color: var(--text-muted);
+  padding: 4px 0;
+}
+.status .dot {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--text-muted);
+  margin-right: 4px;
+  vertical-align: middle;
+}
+.status .dot.active {
+  background: var(--green);
+  box-shadow: 0 0 6px rgba(16,185,129,0.5);
+  animation: blink 1.2s infinite;
+}
+@keyframes blink {
+  0%,100% { opacity:1; }
+  50% { opacity:0.4; }
+}
+
+/* Idle state */
+.idle-hint {
+  color: var(--text-muted);
+  font-size: 0.85rem;
+}
+
+/* Recording mode specific */
+.mode-record .history-card { display: none; }
+.mode-realtime .record-result { display: none !important; }
+</style>
+</head>
+<body>
+
+<div class="container" id="app">
+  <div class="header">
+    <h1>PITCH DETECTOR</h1>
+    <p>实时音高检测 · 唱歌练习助手</p>
+  </div>
+
+  <div class="mode-tabs">
+    <button class="mode-tab active" data-mode="realtime" onclick="switchMode('realtime')">🎤 实时监测</button>
+    <button class="mode-tab" data-mode="record" onclick="switchMode('record')">🎙 录音分析</button>
+  </div>
+
+  <div class="pitch-display">
+    <div class="note-name" id="noteName"><span class="idle-hint">点击开始</span></div>
+    <div class="freq-display" id="freqDisplay">— <span>Hz</span></div>
+    <div class="cents-bar-wrapper">
+      <div class="cents-labels"><span>偏低 ♭</span><span>准确</span><span>偏高 ♯</span></div>
+      <div class="cents-bar">
+        <div class="center-mark"></div>
+        <div class="cents-needle" id="centsNeedle"></div>
+      </div>
+    </div>
+    <div class="cents-value" id="centsValue">— cents</div>
+  </div>
+
+  <div class="visual-card">
+    <canvas id="waveCanvas"></canvas>
+  </div>
+
+  <div class="history-card" id="historyCard">
+    <div class="card-label">音高轨迹 · Pitch Timeline</div>
+    <canvas id="historyCanvas"></canvas>
+  </div>
+
+  <div class="record-result" id="recordResult">
+    <h3>📊 录音分析结果</h3>
+    <div class="stat-grid">
+      <div class="stat-item">
+        <div class="label">平均频率</div>
+        <div class="value" id="avgFreq">—</div>
+      </div>
+      <div class="stat-item">
+        <div class="label">最高音</div>
+        <div class="value" id="maxNote">—</div>
+      </div>
+      <div class="stat-item">
+        <div class="label">最低音</div>
+        <div class="value" id="minNote">—</div>
+      </div>
+      <div class="stat-item">
+        <div class="label">音域跨度</div>
+        <div class="value" id="rangeVal">—</div>
+      </div>
+    </div>
+    <div class="note-list">
+      <div class="label">检测到的音高分布</div>
+      <div class="note-tags" id="noteTags"></div>
+    </div>
+  </div>
+
+  <div class="controls">
+    <button class="btn btn-primary" id="mainBtn" onclick="toggleListening()">
+      <span id="btnIcon">▶</span>
+      <span id="btnText">开始检测</span>
+    </button>
+    <button class="btn btn-secondary" id="clearBtn" onclick="clearHistory()" style="flex:0.4">清除</button>
+  </div>
+
+  <div class="status">
+    <span class="dot" id="statusDot"></span>
+    <span id="statusText">等待开始…</span>
+  </div>
+</div>
+
+<script>
+// ======== Audio & Pitch Detection Engine ========
+const NOTE_NAMES = ['C','C#','D','D#','E','F','F#','G','G#','A','A#','B'];
+const A4 = 440;
+
+let audioCtx = null;
+let analyser = null;
+let mediaStream = null;
+let sourceNode = null;
+let isListening = false;
+let currentMode = 'realtime';
+let animFrameId = null;
+
+// Buffers
+let buf = null;
+let bufLen = 0;
+
+// History for timeline
+let pitchHistory = [];
+const MAX_HISTORY = 200;
+
+// Recording data
+let recordedPitches = [];
+
+// Canvas refs
+const waveCanvas = document.getElementById('waveCanvas');
+const waveCtx = waveCanvas.getContext('2d');
+const historyCanvas = document.getElementById('historyCanvas');
+const historyCtx = historyCanvas.getContext('2d');
+
+function resizeCanvases() {
+  const dpr = window.devicePixelRatio || 1;
+  [waveCanvas, historyCanvas].forEach(c => {
+    const rect = c.getBoundingClientRect();
+    c.width = rect.width * dpr;
+    c.height = rect.height * dpr;
+    c.getContext('2d').scale(dpr, dpr);
+  });
+}
+window.addEventListener('resize', resizeCanvases);
+
+// ======== Pitch Detection (Autocorrelation / YIN-lite) ========
+function detectPitch(buf, sampleRate) {
+  // Simple preprocessing: check if signal is loud enough
+  let rms = 0;
+  for (let i = 0; i < buf.length; i++) rms += buf[i] * buf[i];
+  rms = Math.sqrt(rms / buf.length);
+  if (rms < 0.01) return -1; // too quiet
+
+  // YIN-inspired autocorrelation
+  const SIZE = buf.length;
+  const MAX_LAG = Math.floor(SIZE / 2);
+  // Difference function
+  const diff = new Float32Array(MAX_LAG);
+  for (let tau = 0; tau < MAX_LAG; tau++) {
+    let sum = 0;
+    for (let i = 0; i < MAX_LAG; i++) {
+      const d = buf[i] - buf[i + tau];
+      sum += d * d;
+    }
+    diff[tau] = sum;
+  }
+
+  // Cumulative mean normalized difference
+  const cmndf = new Float32Array(MAX_LAG);
+  cmndf[0] = 1;
+  let runningSum = 0;
+  for (let tau = 1; tau < MAX_LAG; tau++) {
+    runningSum += diff[tau];
+    cmndf[tau] = diff[tau] / (runningSum / tau);
+  }
+
+  // Absolute threshold (YIN paper uses 0.1-0.15)
+  const threshold = 0.15;
+  let tauEstimate = -1;
+
+  // Minimum period corresponds to ~2000Hz (skip very high freq noise)
+  const minTau = Math.floor(sampleRate / 2000);
+  // Maximum period corresponds to ~60Hz
+  const maxTau = Math.min(MAX_LAG - 1, Math.floor(sampleRate / 60));
+
+  for (let tau = minTau; tau < maxTau; tau++) {
+    if (cmndf[tau] < threshold) {
+      // Find the minimum in this dip
+      while (tau + 1 < maxTau && cmndf[tau + 1] < cmndf[tau]) tau++;
+      tauEstimate = tau;
+      break;
+    }
+  }
+
+  if (tauEstimate === -1) {
+    // Fallback: find global minimum
+    let minVal = Infinity;
+    for (let tau = minTau; tau < maxTau; tau++) {
+      if (cmndf[tau] < minVal) {
+        minVal = cmndf[tau];
+        tauEstimate = tau;
+      }
+    }
+    if (minVal > 0.4) return -1; // not confident
+  }
+
+  // Parabolic interpolation for sub-sample accuracy
+  if (tauEstimate > 0 && tauEstimate < MAX_LAG - 1) {
+    const s0 = cmndf[tauEstimate - 1];
+    const s1 = cmndf[tauEstimate];
+    const s2 = cmndf[tauEstimate + 1];
+    const betterTau = tauEstimate + (s0 - s2) / (2 * (s0 - 2 * s1 + s2));
+    if (isFinite(betterTau)) return sampleRate / betterTau;
+  }
+
+  return sampleRate / tauEstimate;
+}
+
+// ======== Music Theory Helpers ========
+function freqToNote(freq) {
+  if (freq <= 0) return null;
+  const semitones = 12 * Math.log2(freq / A4);
+  const midi = Math.round(semitones) + 69;
+  const noteIndex = ((midi % 12) + 12) % 12;
+  const octave = Math.floor(midi / 12) - 1;
+  const cents = Math.round((semitones - Math.round(semitones)) * 100);
+  return {
+    name: NOTE_NAMES[noteIndex],
+    octave: octave,
+    midi: midi,
+    cents: cents,
+    freq: freq
+  };
+}
+
+function midiToFreq(midi) {
+  return A4 * Math.pow(2, (midi - 69) / 12);
+}
+
+// ======== UI References ========
+const noteNameEl = document.getElementById('noteName');
+const freqDisplayEl = document.getElementById('freqDisplay');
+const centsNeedleEl = document.getElementById('centsNeedle');
+const centsValueEl = document.getElementById('centsValue');
+const mainBtn = document.getElementById('mainBtn');
+const btnIcon = document.getElementById('btnIcon');
+const btnText = document.getElementById('btnText');
+const statusDot = document.getElementById('statusDot');
+const statusText = document.getElementById('statusText');
+const historyCard = document.getElementById('historyCard');
+const recordResult = document.getElementById('recordResult');
+
+// ======== Core Loop ========
+function startAudio() {
+  return navigator.mediaDevices.getUserMedia({
+    audio: {
+      echoCancellation: false,
+      noiseSuppression: false,
+      autoGainControl: false,
+      sampleRate: 48000
+    }
+  }).then(stream => {
+    mediaStream = stream;
+    audioCtx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 48000 });
+    analyser = audioCtx.createAnalyser();
+    analyser.fftSize = 4096; // Good balance of speed & accuracy
+    analyser.smoothingTimeConstant = 0;
+
+    sourceNode = audioCtx.createMediaStreamSource(stream);
+    sourceNode.connect(analyser);
+
+    bufLen = analyser.fftSize;
+    buf = new Float32Array(bufLen);
+  });
+}
+
+function stopAudio() {
+  if (animFrameId) cancelAnimationFrame(animFrameId);
+  animFrameId = null;
+  if (sourceNode) { sourceNode.disconnect(); sourceNode = null; }
+  if (mediaStream) { mediaStream.getTracks().forEach(t => t.stop()); mediaStream = null; }
+  if (audioCtx) { audioCtx.close(); audioCtx = null; }
+}
+
+function loop() {
+  if (!isListening) return;
+  animFrameId = requestAnimationFrame(loop);
+
+  analyser.getFloatTimeDomainData(buf);
+  const freq = detectPitch(buf, audioCtx.sampleRate);
+  const note = freqToNote(freq);
+
+  updateDisplay(note, freq);
+  drawWaveform(buf);
+
+  if (currentMode === 'realtime') {
+    if (freq > 0) {
+      pitchHistory.push({ freq, midi: note ? note.midi : 0, time: Date.now() });
+      if (pitchHistory.length > MAX_HISTORY) pitchHistory.shift();
+    }
+    drawHistory();
+  } else if (currentMode === 'record' && freq > 0 && note) {
+    recordedPitches.push({ freq, note: note.name, octave: note.octave, midi: note.midi, cents: note.cents, time: Date.now() });
+  }
+}
+
+// ======== Display Updates ========
+function updateDisplay(note, freq) {
+  if (!note || freq <= 0) {
+    noteNameEl.innerHTML = '<span class="idle-hint">…</span>';
+    noteNameEl.className = 'note-name';
+    freqDisplayEl.innerHTML = '— <span>Hz</span>';
+    centsNeedleEl.style.left = '50%';
+    centsNeedleEl.className = 'cents-needle';
+    centsValueEl.textContent = '— cents';
+    return;
+  }
+
+  const cents = note.cents;
+  const absCents = Math.abs(cents);
+  let accClass = '';
+  if (absCents <= 5) accClass = 'perfect';
+  else if (cents > 0) accClass = 'sharp';
+  else accClass = 'flat';
+
+  noteNameEl.innerHTML = `${note.name}<span class="octave">${note.octave}</span>`;
+  noteNameEl.className = 'note-name ' + accClass;
+
+  freqDisplayEl.innerHTML = `${freq.toFixed(1)} <span>Hz</span>`;
+
+  // Cents bar: map -50..+50 to 0%..100%
+  const pct = Math.max(0, Math.min(100, 50 + cents));
+  centsNeedleEl.style.left = pct + '%';
+  centsNeedleEl.className = 'cents-needle ' + accClass;
+
+  const sign = cents > 0 ? '+' : '';
+  centsValueEl.textContent = `${sign}${cents} cents`;
+}
+
+// ======== Waveform Drawing ========
+function drawWaveform(buf) {
+  const w = waveCanvas.getBoundingClientRect().width;
+  const h = waveCanvas.getBoundingClientRect().height;
+  waveCtx.clearRect(0, 0, w, h);
+
+  // Gradient background
+  const grad = waveCtx.createLinearGradient(0, 0, 0, h);
+  grad.addColorStop(0, 'rgba(17,24,39,0.6)');
+  grad.addColorStop(1, 'rgba(17,24,39,0.9)');
+  waveCtx.fillStyle = grad;
+  waveCtx.fillRect(0, 0, w, h);
+
+  // Center line
+  waveCtx.strokeStyle = 'rgba(100,116,139,0.2)';
+  waveCtx.lineWidth = 1;
+  waveCtx.beginPath();
+  waveCtx.moveTo(0, h / 2);
+  waveCtx.lineTo(w, h / 2);
+  waveCtx.stroke();
+
+  // Waveform
+  waveCtx.strokeStyle = 'rgba(34,211,238,0.7)';
+  waveCtx.lineWidth = 1.5;
+  waveCtx.beginPath();
+  const sliceWidth = w / buf.length;
+  let x = 0;
+  // Downsample for performance
+  const step = Math.max(1, Math.floor(buf.length / w));
+  for (let i = 0; i < buf.length; i += step) {
+    const v = buf[i];
+    const y = (v * 0.5 + 0.5) * h;
+    if (i === 0) waveCtx.moveTo(x, y);
+    else waveCtx.lineTo(x, y);
+    x += sliceWidth * step;
+  }
+  waveCtx.stroke();
+
+  // Glow
+  waveCtx.strokeStyle = 'rgba(34,211,238,0.15)';
+  waveCtx.lineWidth = 4;
+  waveCtx.beginPath();
+  x = 0;
+  for (let i = 0; i < buf.length; i += step) {
+    const v = buf[i];
+    const y = (v * 0.5 + 0.5) * h;
+    if (i === 0) waveCtx.moveTo(x, y);
+    else waveCtx.lineTo(x, y);
+    x += sliceWidth * step;
+  }
+  waveCtx.stroke();
+}
+
+// ======== Pitch History Drawing ========
+function drawHistory() {
+  const w = historyCanvas.getBoundingClientRect().width;
+  const h = historyCanvas.getBoundingClientRect().height;
+  historyCtx.clearRect(0, 0, w, h);
+
+  historyCtx.fillStyle = 'rgba(17,24,39,0.7)';
+  historyCtx.fillRect(0, 0, w, h);
+
+  if (pitchHistory.length < 2) return;
+
+  // Find MIDI range
+  let minMidi = Infinity, maxMidi = -Infinity;
+  for (const p of pitchHistory) {
+    if (p.midi < minMidi) minMidi = p.midi;
+    if (p.midi > maxMidi) maxMidi = p.midi;
+  }
+  // Pad range
+  minMidi = Math.max(0, minMidi - 3);
+  maxMidi = maxMidi + 3;
+  if (maxMidi - minMidi < 12) {
+    const mid = (minMidi + maxMidi) / 2;
+    minMidi = mid - 6;
+    maxMidi = mid + 6;
+  }
+
+  // Draw note grid lines
+  historyCtx.strokeStyle = 'rgba(100,116,139,0.1)';
+  historyCtx.lineWidth = 1;
+  historyCtx.font = '9px JetBrains Mono';
+  historyCtx.fillStyle = 'rgba(100,116,139,0.4)';
+  for (let midi = Math.ceil(minMidi); midi <= Math.floor(maxMidi); midi++) {
+    const noteIdx = ((midi % 12) + 12) % 12;
+    if (noteIdx === 0 || noteIdx === 4 || noteIdx === 7) { // C, E, G
+      const y = h - ((midi - minMidi) / (maxMidi - minMidi)) * h;
+      historyCtx.beginPath();
+      historyCtx.moveTo(0, y);
+      historyCtx.lineTo(w, y);
+      historyCtx.stroke();
+      const oct = Math.floor(midi / 12) - 1;
+      historyCtx.fillText(NOTE_NAMES[noteIdx] + oct, 2, y - 2);
+    }
+  }
+
+  // Draw pitch line
+  historyCtx.strokeStyle = 'var(--accent)';
+  historyCtx.strokeStyle = '#22d3ee';
+  historyCtx.lineWidth = 2;
+  historyCtx.beginPath();
+  for (let i = 0; i < pitchHistory.length; i++) {
+    const x = (i / MAX_HISTORY) * w;
+    const y = h - ((pitchHistory[i].midi - minMidi) / (maxMidi - minMidi)) * h;
+    if (i === 0) historyCtx.moveTo(x, y);
+    else historyCtx.lineTo(x, y);
+  }
+  historyCtx.stroke();
+
+  // Glow
+  historyCtx.strokeStyle = 'rgba(34,211,238,0.2)';
+  historyCtx.lineWidth = 5;
+  historyCtx.beginPath();
+  for (let i = 0; i < pitchHistory.length; i++) {
+    const x = (i / MAX_HISTORY) * w;
+    const y = h - ((pitchHistory[i].midi - minMidi) / (maxMidi - minMidi)) * h;
+    if (i === 0) historyCtx.moveTo(x, y);
+    else historyCtx.lineTo(x, y);
+  }
+  historyCtx.stroke();
+
+  // Current position dot
+  const last = pitchHistory[pitchHistory.length - 1];
+  const lx = ((pitchHistory.length - 1) / MAX_HISTORY) * w;
+  const ly = h - ((last.midi - minMidi) / (maxMidi - minMidi)) * h;
+  historyCtx.beginPath();
+  historyCtx.arc(lx, ly, 4, 0, Math.PI * 2);
+  historyCtx.fillStyle = '#22d3ee';
+  historyCtx.fill();
+}
+
+// ======== Recording Analysis ========
+function analyzeRecording() {
+  if (recordedPitches.length < 5) {
+    recordResult.classList.remove('visible');
+    return;
+  }
+
+  const freqs = recordedPitches.map(p => p.freq);
+  const midis = recordedPitches.map(p => p.midi);
+
+  const avgFreq = freqs.reduce((a, b) => a + b, 0) / freqs.length;
+  const minMidi = Math.min(...midis);
+  const maxMidi = Math.max(...midis);
+  const minNote = freqToNote(midiToFreq(minMidi));
+  const maxNote = freqToNote(midiToFreq(maxMidi));
+
+  document.getElementById('avgFreq').textContent = avgFreq.toFixed(1) + ' Hz';
+  document.getElementById('maxNote').textContent = maxNote.name + maxNote.octave;
+  document.getElementById('minNote').textContent = minNote.name + minNote.octave;
+  document.getElementById('rangeVal').textContent = (maxMidi - minMidi) + ' 半音';
+
+  // Note distribution
+  const noteCounts = {};
+  for (const p of recordedPitches) {
+    const key = p.note + p.octave;
+    noteCounts[key] = (noteCounts[key] || 0) + 1;
+  }
+  const sorted = Object.entries(noteCounts).sort((a, b) => b[1] - a[1]);
+  const tagsContainer = document.getElementById('noteTags');
+  tagsContainer.innerHTML = '';
+  for (const [note, count] of sorted.slice(0, 12)) {
+    const pct = ((count / recordedPitches.length) * 100).toFixed(0);
+    const tag = document.createElement('span');
+    tag.className = 'note-tag';
+    tag.textContent = `${note} (${pct}%)`;
+    tagsContainer.appendChild(tag);
+  }
+
+  // Draw the full pitch timeline for recording
+  drawRecordingTimeline();
+
+  recordResult.classList.add('visible');
+}
+
+function drawRecordingTimeline() {
+  const w = historyCanvas.getBoundingClientRect().width;
+  const h = historyCanvas.getBoundingClientRect().height;
+  historyCtx.clearRect(0, 0, w, h);
+  historyCtx.fillStyle = 'rgba(17,24,39,0.7)';
+  historyCtx.fillRect(0, 0, w, h);
+
+  if (recordedPitches.length < 2) return;
+
+  const midis = recordedPitches.map(p => p.midi);
+  let minMidi = Math.min(...midis) - 3;
+  let maxMidi = Math.max(...midis) + 3;
+  if (maxMidi - minMidi < 12) {
+    const mid = (minMidi + maxMidi) / 2;
+    minMidi = mid - 6;
+    maxMidi = mid + 6;
+  }
+
+  // Grid
+  historyCtx.strokeStyle = 'rgba(100,116,139,0.1)';
+  historyCtx.lineWidth = 1;
+  historyCtx.font = '9px JetBrains Mono';
+  historyCtx.fillStyle = 'rgba(100,116,139,0.4)';
+  for (let midi = Math.ceil(minMidi); midi <= Math.floor(maxMidi); midi++) {
+    const noteIdx = ((midi % 12) + 12) % 12;
+    if (noteIdx === 0 || noteIdx === 4 || noteIdx === 7) {
+      const y = h - ((midi - minMidi) / (maxMidi - minMidi)) * h;
+      historyCtx.beginPath();
+      historyCtx.moveTo(0, y);
+      historyCtx.lineTo(w, y);
+      historyCtx.stroke();
+      const oct = Math.floor(midi / 12) - 1;
+      historyCtx.fillText(NOTE_NAMES[noteIdx] + oct, 2, y - 2);
+    }
+  }
+
+  // Line
+  const total = recordedPitches.length;
+  historyCtx.strokeStyle = '#f59e0b';
+  historyCtx.lineWidth = 2;
+  historyCtx.beginPath();
+  for (let i = 0; i < total; i++) {
+    const x = (i / total) * w;
+    const y = h - ((recordedPitches[i].midi - minMidi) / (maxMidi - minMidi)) * h;
+    if (i === 0) historyCtx.moveTo(x, y);
+    else historyCtx.lineTo(x, y);
+  }
+  historyCtx.stroke();
+}
+
+// ======== Controls ========
+async function toggleListening() {
+  if (isListening) {
+    isListening = false;
+    stopAudio();
+    mainBtn.classList.remove('recording');
+    btnIcon.textContent = '▶';
+    btnText.textContent = currentMode === 'realtime' ? '开始检测' : '开始录音';
+    statusDot.classList.remove('active');
+    statusText.textContent = '已停止';
+
+    if (currentMode === 'record') {
+      analyzeRecording();
+      historyCard.style.display = 'block';
+    }
+  } else {
+    try {
+      await startAudio();
+      resizeCanvases();
+      isListening = true;
+
+      if (currentMode === 'record') {
+        recordedPitches = [];
+        recordResult.classList.remove('visible');
+        historyCard.style.display = 'none';
+      }
+
+      mainBtn.classList.add('recording');
+      btnIcon.textContent = '⏹';
+      btnText.textContent = currentMode === 'realtime' ? '停止检测' : '停止录音';
+      statusDot.classList.add('active');
+      statusText.textContent = currentMode === 'realtime' ? '正在监听…' : '正在录音…';
+
+      loop();
+    } catch (err) {
+      statusText.textContent = '麦克风权限被拒绝';
+      console.error(err);
+    }
+  }
+}
+
+function switchMode(mode) {
+  if (isListening) toggleListening();
+  currentMode = mode;
+  document.querySelectorAll('.mode-tab').forEach(t => {
+    t.classList.toggle('active', t.dataset.mode === mode);
+  });
+  btnText.textContent = mode === 'realtime' ? '开始检测' : '开始录音';
+
+  if (mode === 'realtime') {
+    historyCard.style.display = 'block';
+    recordResult.classList.remove('visible');
+    document.getElementById('app').classList.remove('mode-record');
+    document.getElementById('app').classList.add('mode-realtime');
+  } else {
+    historyCard.style.display = 'none';
+    document.getElementById('app').classList.remove('mode-realtime');
+    document.getElementById('app').classList.add('mode-record');
+  }
+
+  noteNameEl.innerHTML = '<span class="idle-hint">点击开始</span>';
+  freqDisplayEl.innerHTML = '— <span>Hz</span>';
+  centsNeedleEl.style.left = '50%';
+  centsValueEl.textContent = '— cents';
+  statusText.textContent = '等待开始…';
+}
+
+function clearHistory() {
+  pitchHistory = [];
+  recordedPitches = [];
+  recordResult.classList.remove('visible');
+
+  const w = historyCanvas.getBoundingClientRect().width;
+  const h = historyCanvas.getBoundingClientRect().height;
+  historyCtx.clearRect(0, 0, w, h);
+
+  noteNameEl.innerHTML = '<span class="idle-hint">点击开始</span>';
+  freqDisplayEl.innerHTML = '— <span>Hz</span>';
+  centsNeedleEl.style.left = '50%';
+  centsValueEl.textContent = '— cents';
+}
+
+// Init
+resizeCanvases();
+switchMode('realtime');
+</script>
+</body>
+</html>
